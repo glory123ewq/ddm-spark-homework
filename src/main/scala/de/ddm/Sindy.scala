@@ -14,38 +14,42 @@ object Sindy {
       .csv(input)
   }
 
+
+
   def discoverINDs(inputs: List[String], spark: SparkSession): Unit = {
     import spark.implicits._
 
-    val entered_Data = inputs.map(input => readData(input, spark))
-      .map(table => {
-        val cols = table.columns
-        table.flatMap(row => for (i <- cols.indices) yield (cols(i), row.getString(i)))
-      });
-
-
-    val fullData = entered_Data.reduce((set1, set2) => set1 union set2);
-
-    val valuGrouped = fullData.groupByKey(t => t._2)
-
+    val enteredData = inputs.map(input => readData(input, spark))
+      .map(inputTable => {
+        val columns = inputTable.columns
+        inputTable.flatMap(row => {
+          for (i <- columns.indices) yield {
+            (columns(i), row.getString(i))
+          }
+        })
+      })
+    val fullData = enteredData.reduce((firstSet, secondSet) => firstSet union secondSet);
+    val groupedByValue = fullData.groupByKey(t => t._2)
       .mapGroups((_, iterator) => iterator.map(_._1).toSet);
-
-    val INDs = valuGrouped.flatMap(Set => Set
+    val finalINDs = groupedByValue.flatMap(Set => Set
         .map(currentAttr => (currentAttr, Set.filter(attr => !attr.equals(currentAttr)))))
       .groupByKey(row => row._1)
-      .mapGroups((key, iterator) => (key, iterator.map(row => row._2).reduce((set1, set2) => set1.intersect(set2))))
+      .mapGroups((key, iterator) => (key, iterator.map(row => row._2).reduce((firstSet, secondSet) => firstSet.intersect(secondSet))))
       .collect();
 
-    val sortedINDs = INDs.sortBy(tuple => tuple._1);
-    for(tuple <- sortedINDs) {
-      val attribute = tuple._1
-      val values = tuple._2
+    val sortedINDs = finalINDs.sortWith(_._1 < _._1)
+    for((attribute, values) <- sortedINDs) {
 
       // Check if the set of values is not empty
-      if (values.nonEmpty) {
-        val valuesString = values.mkString(",");
-        println(s"$attribute -> $valuesString")
+      values match {
+        case nonEmptyValues if nonEmptyValues.nonEmpty =>
+          val valuesString = nonEmptyValues.mkString(",")
+          println(s"$attribute -> $valuesString")
+        case _ => // do nothing for empty values
+
       }
     }
   }
+
+
 }
